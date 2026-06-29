@@ -1071,10 +1071,14 @@ function isEnded(p){
 function hasSeat(p){
   return !!(p.seat && p.seat.trim()!=="");
 }
-// 마티네(낮공연): 시작 시각이 17시 이전
+// 마티네(평일 낮공연): 시작 시각이 17시 이전이면서 주말·공휴일이 아닌 날
 function isMatinee(p){
   const h = parseInt((p.time||"").slice(0,2), 10);
-  return Number.isFinite(h) && h < 17;
+  if(!(Number.isFinite(h) && h < 17)) return false;
+  const dow = dowOf(p.date);
+  if(dow===0 || dow===6) return false;            // 토·일 제외
+  if(holidaySet.has((p.date||"").trim())) return false; // 공휴일 제외
+  return true;
 }
 
 /* =========================================================
@@ -1493,7 +1497,7 @@ function renderEtcStats(){
       if(holidaySet.has((p.date||"").trim()) && !weekend) add(hol, p);
     });
     let rows = DOW.map((name,i)=>`<tr><td>${name}</td>${cells(d[i])}</tr>`).join("");
-    rows += `<tr class="etc-subrow"><td>마티네</td>${cells(mat)}</tr>`;
+    rows += `<tr class="etc-subrow"><td>마티네(평일 낮)</td>${cells(mat)}</tr>`;
     rows += `<tr class="etc-subrow"><td>휴일(주말 제외)</td>${cells(hol)}</tr>`;
     return `<table class="role-stat-table"><thead><tr><th>요일</th><th>전체</th><th>종료</th><th>관극</th><th>예매</th></tr></thead><tbody>${rows}</tbody></table>`;
   }
