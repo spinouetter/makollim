@@ -3205,6 +3205,7 @@ function wireTicketManager(bodyEl){
     row.addEventListener("pointerdown", e=>{
       if(e.button!=null && e.button!==0) return;
       if(tmEditTi>=0) return; // 팝오버 열려있으면 무시
+      if(lpPending || lpActive) return; // 이미 다른 포인터로 진행 중 → 두 번째 손가락 무시(멀티터치 상태 꼬임 방지)
       lpFromTi = +row.dataset.ti; lpStartY = e.clientY; lpStartX = e.clientX; lpToTi=-1;
       lpActive = false; lpPending = true; lpRow = row; lpPid = e.pointerId;
       clearTimeout(lpTimer);
@@ -3260,6 +3261,7 @@ function lpActivateDrag(){
 }
 function lpMove(e){
   if(lpFromTi<0) return;
+  if(lpPid!=null && e.pointerId!==lpPid) return; // 진행 중인 포인터의 이동만 처리(멀티터치)
   if(!lpActive){
     // 8px 이상 움직이면 즉시 이동 모드 진입(요소 종류와 무관)
     if(Math.abs(e.clientY-lpStartY)>8 || Math.abs(e.clientX-lpStartX)>8) lpActivateDrag();
@@ -3272,7 +3274,8 @@ function lpMove(e){
   lpToTi = ins;                                // 현재 위치라도 항상 인디케이터 표시
   lpDrawIndicator(ins);
 }
-function lpEnd(){
+function lpEnd(e){
+  if(lpPid!=null && e && e.pointerId!==lpPid) return; // 진행 중인 포인터의 떼기/취소만 처리(멀티터치)
   lpPending = false;
   const row = lpRow; lpRow = null;
   try{ if(row && lpPid!=null && row.hasPointerCapture && row.hasPointerCapture(lpPid)) row.releasePointerCapture(lpPid); }catch(_){}
