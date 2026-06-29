@@ -680,7 +680,7 @@ function renderSchedule(){
       ticketPopoverIdx = null;
       renderSchedule();
       renderStats();   // 티켓 변경 → 통계(티켓 금액) 갱신
-      renderSeatMap(); // 시트맵도 함께 갱신
+      renderSeatMap(true); // 시트맵 갱신(사용자 줌/위치 유지)
       saveState();
     });
   });
@@ -707,7 +707,7 @@ function renderSchedule(){
       ticketPopoverIdx = null;
       renderSchedule();
       renderStats();   // 티켓 해제 → 통계(티켓 금액) 갱신
-      renderSeatMap(); // 시트맵도 함께 갱신
+      renderSeatMap(true); // 시트맵 갱신(사용자 줌/위치 유지)
       saveState();
     });
   });
@@ -816,7 +816,7 @@ function renderSchedule(){
       // 좌석이 바뀌었으니 스케줄(티켓 등급·눈 표시)·통계·좌석맵을 갱신
       renderSchedule();
       renderStats();
-      renderSeatMap();
+      renderSeatMap(true); // 좌석맵 줌/위치 유지
       saveState();
     });
   });
@@ -1890,6 +1890,16 @@ function clampViewBox(vb){
   return vb;
 }
 
+// SVG는 preserveAspectRatio 기본값(xMidYMid meet)이라 viewBox 비율과 요소 비율이 다르면
+// 가장자리에 빈 여백(레터박스)이 생긴다. 화면 좌표를 SVG 좌표로 바꿀 땐 이 배율·여백을 반영해야
+// 팬·핀치·휠·미니맵이 손가락/커서와 정확히 일치한다.
+function svgMeetScale(rect, vb){ return Math.min(rect.width/vb.w, rect.height/vb.h); }
+function clientToSvgPt(rect, vb, clientX, clientY){
+  const s = svgMeetScale(rect, vb);
+  const offX = (rect.width - vb.w*s)/2, offY = (rect.height - vb.h*s)/2; // 중앙 정렬 여백
+  return { x: vb.x + (clientX - rect.left - offX)/s, y: vb.y + (clientY - rect.top - offY)/s };
+}
+
 function zoomBy(factor, centerX, centerY){
   const newW = mainViewBox.w*factor;
   const newH = mainViewBox.h*factor;
@@ -2116,14 +2126,14 @@ function setupSeatMapInteractions(){
     if(activePointers.size===2 && pinchStartDist){
       const pts = [...activePointers.values()];
       const dist = Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
+      if(!dist) return;                          // 두 점이 겹치면 0 나눗셈(Infinity) 방지
       const midX = (pts[0].x+pts[1].x)/2, midY = (pts[0].y+pts[1].y)/2;
       const rect = mainSvg.getBoundingClientRect();
       const scaleFactor = pinchStartDist / dist; // 손가락이 멀어지면(확대) factor<1
-      const cx = pinchStartVb.x + ((midX-rect.left)/rect.width)*pinchStartVb.w;
-      const cy = pinchStartVb.y + ((midY-rect.top)/rect.height)*pinchStartVb.h;
+      const c = clientToSvgPt(rect, pinchStartVb, midX, midY); // 레터박스 보정된 핀치 중심
       mainViewBox = clampViewBox({
-        x: cx - (cx-pinchStartVb.x)*scaleFactor,
-        y: cy - (cy-pinchStartVb.y)*scaleFactor,
+        x: c.x - (c.x-pinchStartVb.x)*scaleFactor,
+        y: c.y - (c.y-pinchStartVb.y)*scaleFactor,
         w: pinchStartVb.w*scaleFactor,
         h: pinchStartVb.h*scaleFactor
       });
@@ -2141,11 +2151,10 @@ function setupSeatMapInteractions(){
       mainSvg.classList.add("dragging");
     }
     const rect = mainSvg.getBoundingClientRect();
-    const scaleX = startVb.w / rect.width;
-    const scaleY = startVb.h / rect.height;
+    const s = svgMeetScale(rect, startVb);   // 레터박스 반영한 실제 화면 배율
     mainViewBox = clampViewBox({
-      x: startVb.x - dxScreen*scaleX,
-      y: startVb.y - dyScreen*scaleY,
+      x: startVb.x - dxScreen/s,
+      y: startVb.y - dyScreen/s,
       w: startVb.w, h: startVb.h
     });
     applyMainViewBox();
@@ -2154,6 +2163,12 @@ function setupSeatMapInteractions(){
   function endPointer(e){
     activePointers.delete(e.pointerId);
     if(activePointers.size<2){ pinchStartDist = null; pinchStartVb = null; }
+    if(activePointers.size===1){
+      // 핀치에서 한 손가락만 떼면 남은 손가락으로 단일 팬을 다시 시작(끊김 방지)
+      const [pt] = [...activePointers.values()];
+      isDragging = true; svgDidDrag = true;          // 제스처 직후 click(좌석 선택) 억제 유지
+      startScreenX = pt.x; startScreenY = pt.y; startVb = { ...mainViewBox };
+    }
     if(activePointers.size===0){
       isDragging = false;
       mainSvg.classList.remove("dragging");
@@ -2167,11 +2182,9 @@ function setupSeatMapInteractions(){
   mainSvg.addEventListener("wheel", e=>{
     e.preventDefault();
     const rect = mainSvg.getBoundingClientRect();
-    const px = e.clientX - rect.left, py = e.clientY - rect.top;
-    const sx = mainViewBox.x + (px/rect.width)*mainViewBox.w;
-    const sy = mainViewBox.y + (py/rect.height)*mainViewBox.h;
+    const c = clientToSvgPt(rect, mainViewBox, e.clientX, e.clientY); // 레터박스 보정된 커서 위치
     const factor = e.deltaY > 0 ? 1.12 : 0.89;
-    zoomBy(factor, sx, sy);
+    zoomBy(factor, c.x, c.y);
   }, { passive:false });
   } // end panReady guard
 
@@ -2180,10 +2193,7 @@ function setupSeatMapInteractions(){
   const miniSvg = document.getElementById("minimapSvg");
   const miniToSvg = (clientX, clientY)=>{
     const r = miniSvg.getBoundingClientRect();
-    return {
-      x: SEAT_BBOX.x + ((clientX - r.left) / r.width)  * SEAT_BBOX.w,
-      y: SEAT_BBOX.y + ((clientY - r.top)  / r.height) * SEAT_BBOX.h
-    };
+    return clientToSvgPt(r, SEAT_BBOX, clientX, clientY); // 미니맵도 meet 레터박스 보정
   };
   const centerMainOn = (x, y)=>{
     mainViewBox = clampViewBox({ x: x - mainViewBox.w/2, y: y - mainViewBox.h/2, w: mainViewBox.w, h: mainViewBox.h });
@@ -3092,6 +3102,7 @@ function setupSeatOverlayZoom(bbox, topPos, mult, hiPos){
     const r = svg.getBoundingClientRect();
     if(pts.size===2 && pinchDist){
       const a=[...pts.values()]; const dist=Math.hypot(a[0].x-a[1].x, a[0].y-a[1].y);
+      if(!dist) return;                          // 두 점이 겹치면 0 나눗셈 방지
       const midX=(a[0].x+a[1].x)/2, midY=(a[0].y+a[1].y)/2;
       const f = pinchDist/dist; // 벌리면 확대(f<1)
       const cx = pinchVb.x + ((midX-r.left)/r.width)*pinchVb.w;
@@ -3103,7 +3114,7 @@ function setupSeatOverlayZoom(bbox, topPos, mult, hiPos){
     const dx=(e.clientX-sx)*(startVb.w/r.width), dy=(e.clientY-sy)*(startVb.h/r.height);
     vb = clamp({ x: startVb.x-dx, y: startVb.y-dy, w: startVb.w, h: startVb.h }); apply();
   });
-  function end(e){ pts.delete(e.pointerId); if(pts.size<2){ pinchDist=null; } if(pts.size===0) dragging=false; try{ svg.releasePointerCapture(e.pointerId); }catch(_){} }
+  function end(e){ pts.delete(e.pointerId); if(pts.size<2){ pinchDist=null; } if(pts.size===1){ const [p]=[...pts.values()]; dragging=true; sx=p.x; sy=p.y; startVb={...vb}; } if(pts.size===0) dragging=false; try{ svg.releasePointerCapture(e.pointerId); }catch(_){} }
   svg.addEventListener("pointerup", end);
   svg.addEventListener("pointercancel", end);
   svg.addEventListener("wheel", e=>{
@@ -3124,7 +3135,7 @@ function tmCommit(){
   saveState();
   renderSchedule();
   renderStats();    // 맨 위 티켓이 통계/좌석맵에 반영되므로 함께 갱신(좌석 변경·순서변경·삭제 시)
-  renderSeatMap();
+  renderSeatMap(true); // 좌석맵 줌/위치 유지
 }
 function openTicketManager(idx){
   tmIdx = idx; tmEditTi = -1;
@@ -3624,7 +3635,7 @@ async function init(){
     if(nowEndedCount !== lastEndedCount){
       lastEndedCount = nowEndedCount;
       renderStats();
-      renderSeatMap();
+      renderSeatMap(true); // 종료 카운트 변화 시 갱신하되 줌/위치 유지
     }
   }, 30000); // 30초마다 확인
 }
