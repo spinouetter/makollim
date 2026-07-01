@@ -11,7 +11,7 @@
 (function(){
   "use strict";
 
-  const BOARD_URL = "images/finale-board.svg?v=6";
+  const BOARD_URL = "images/finale-board.svg?v=14";
   const META_URL  = "images/finale-board.meta.json?v=3";
   const CBD_PATH  = "json/casting_by_date.json";
   // SVG에 임베드할 웹폰트(무료 OFL). 미리보기·PNG/JPG/PDF 내보내기 모두 자급자족.
@@ -234,8 +234,10 @@
     const grades = performanceData.grades || [];
     const gradeOf = id => { for(const g of grades){ if(g.seatIds && g.seatIds.includes(id)) return g.name; } return null; };
 
-    // 기존 좌석 그리드 + STAGE/층/범례 텍스트 제거(+ 빨강 패널로 덮어 잔상 제거)
+    // 기존 좌석 그리드 + 원본 좌석 패널(반투명 흰 오버레이 st6) + STAGE/층/범례 텍스트 제거
     const grid = svg.querySelector("#fn-seatgrid"); if(grid) grid.remove();
+    // 원본 템플릿 좌석 배경 패널(rect.st6)이 새로 그리는 패널보다 살짝 커서 테두리가 겹쳐 보임 → 제거
+    const oldPanel = svg.querySelector("rect.st6"); if(oldPanel){ (oldPanel.closest("g") || oldPanel).remove(); }
     svg.querySelectorAll("text").forEach(t=>{ const s=(t.textContent||"").trim();
       if(["STAGE","1F","2F","3F","1회","2회","3회","4회 이상"].includes(s)) t.remove(); });
 
@@ -320,8 +322,15 @@
       const measure = s => { ctx.font = (BASE_PX*s) + "px 'Anton', sans-serif"; return ctx.measureText(full).width; };
       let scale = 1.0, guard = 0;
       while(measure(scale) > availW && scale > 0.4 && guard++ < 100){ scale -= 0.01; }  // 라벨 너비 = 언더라인 너비
-      if(full === "BRAITHWAITE") scale = 0.63;  // 긴 라벨: 사용자 선택 고정 크기
-      if(scale < 0.999) t.style.fontSize = (2*scale).toFixed(3) + "em";
+      if(full === "BRAITHWAITE"){
+        // 100% 유지: 언더라인 우변에 오른쪽 정렬하고 왼쪽 글자는 셀 밖(비어 있는 SMALL BOY 위 공간)으로 넘김.
+        // 밑줄·사진 위치는 그대로.
+        scale = 1.0;
+        t.setAttribute("x", availW.toFixed(2));
+        t.removeAttribute("text-anchor"); t.style.textAnchor = "end";
+      } else if(scale < 0.999){
+        t.style.fontSize = (2*scale).toFixed(3) + "em";
+      }
       report.push(full + " → " + Math.round(scale*100) + "%");
     });
     if(report.length) console.log("[finale] 배역 라벨 한 줄 맞춤:", report.join(" | "));
