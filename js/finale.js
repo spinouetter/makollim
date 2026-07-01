@@ -179,9 +179,9 @@
   function heatColor(c){ return HEAT[Math.max(1,Math.min(10,c))-1]; }
   function hx(c){ return [parseInt(c.slice(1,3),16),parseInt(c.slice(3,5),16),parseInt(c.slice(5,7),16)]; }
   function mix(a,b,t){ const A=hx(a),B=hx(b); return '#'+[0,1,2].map(i=>Math.round(A[i]+(B[i]-A[i])*t).toString(16).padStart(2,'0')).join(''); }
-  // 등급 기본색: VIP=기존 좌석색, R·S·A로 갈수록 회색
-  const GRADE_RAMP = { VIP:0, R:0.5, S:0.68, A:0.82 };
-  function gradeBase(grade){ const f = GRADE_RAMP[grade]!=null ? GRADE_RAMP[grade] : 0.9; return mix("#e0a13a", "#6f6c64", f); }
+  // 미관극 좌석 등급색: 백→흑 그라데이션 위치(낮을수록 흰색). VIP 0% · R 10% · S 20% · A 30%
+  const GRADE_RAMP = { VIP:0, R:0.1, S:0.2, A:0.3 };
+  function gradeBase(grade){ const f = GRADE_RAMP[grade]!=null ? GRADE_RAMP[grade] : 0.35; return mix("#ffffff", "#000000", f); }
 
   function injectSeatmap(svg){
     const sm = seatmapData; if(!sm || !sm.seats) return;
@@ -194,24 +194,27 @@
       if(["STAGE","1F","2F","3F","1회","2회","3회","4회 이상"].includes(s)) t.remove(); });
 
     const cover = { x:396, y:664, w:278, h:284 };           // 좌석 패널 영역
-    const chart = { x:408, y:678, w:254, h:218 };           // 좌석도 영역
-    const legendY = 906;
-
     const floors = [...new Set(sm.seats.map(s=>s.floor))].sort((a,b)=>a-b);
-    const GAP = 2; let cursor=0, minX=1e9, maxX=-1e9; const placed=[];
-    floors.forEach(f=>{
+    // 층 사이 간격: 2층↔3층만 -3, 나머지 -2 (음수=겹침)
+    const gapBefore = f => (f===3 ? -2.5 : -2);
+    let cursor=0, minX=1e9, maxX=-1e9; const placed=[];
+    floors.forEach((f,idx)=>{
       const fs = sm.seats.filter(s=>s.floor===f); if(!fs.length) return;
       const fm = (sm.floorMeta||{})[f] || {};
       let xs=fs.map(s=>s.svgX), ys=fs.map(s=>s.svgY);
       (fm.outline||[]).forEach(poly=>poly.forEach(p=>{ xs.push(p[0]); ys.push(p[1]); }));
       if(fm.stage){ const st=fm.stage; xs.push(st.cx-st.w/2, st.cx+st.w/2); ys.push(st.cy-st.h/2, st.cy+st.h/2); }
       const fMinX=Math.min(...xs), fMaxX=Math.max(...xs), fMinY=Math.min(...ys), fMaxY=Math.max(...ys);
+      if(idx>0) cursor += gapBefore(f);
       placed.push({fs,fm,fMinX,fMinY,top:cursor});
-      cursor += (fMaxY-fMinY)+GAP; minX=Math.min(minX,fMinX); maxX=Math.max(maxX,fMaxX);
+      cursor += (fMaxY-fMinY); minX=Math.min(minX,fMinX); maxX=Math.max(maxX,fMaxX);
     });
-    const worldW=(maxX-minX)||1, worldH=(cursor-GAP)||1;
-    const scale=Math.min(chart.w/worldW, chart.h/worldH);
-    const offX=chart.x+(chart.w-worldW*scale)/2, offY=chart.y+(chart.h-worldH*scale)/2;
+    const worldW=(maxX-minX)||1, worldH=cursor||1;
+    // 좌석도: 크롭(cover) 영역에 세로 가운데 배치 + 확대(여백 축소, 하단만 범례 영역 확보)
+    const PADX=10, PADT=10, LEGEND_ZONE=26;
+    const areaW=cover.w-2*PADX, areaTop=cover.y+PADT, areaH=cover.h-PADT-LEGEND_ZONE;
+    const scale=Math.min(areaW/worldW, areaH/worldH);
+    const offX=cover.x+(cover.w-worldW*scale)/2, offY=areaTop+(areaH-worldH*scale)/2;
     const X=x=>offX+(x-minX)*scale;
 
     let mk = `<rect x="${cover.x}" y="${cover.y}" width="${cover.w}" height="${cover.h}" rx="10" fill="#de6363"/>`;
@@ -228,17 +231,16 @@
       });
       if(b.fm.stage){ const st=b.fm.stage;
         const sx=X(st.cx-st.w/2), sy=Y(st.cy-st.h/2), sw=st.w*scale, sh=Math.max(5, st.h*scale);
-        mk += `<rect x="${sx.toFixed(1)}" y="${sy.toFixed(1)}" width="${sw.toFixed(1)}" height="${sh.toFixed(1)}" rx="1.5" fill="#2b2b2b"/>`;
-        mk += `<text x="${X(st.cx).toFixed(1)}" y="${(sy+sh*0.72).toFixed(1)}" text-anchor="middle" font-size="${(sh*0.62).toFixed(1)}" fill="#fff" font-weight="700" letter-spacing="1.5">STAGE</text>`;
+        mk += `<rect x="${sx.toFixed(1)}" y="${sy.toFixed(1)}" width="${sw.toFixed(1)}" height="${sh.toFixed(1)}" rx="1.5" fill="#f2e8d5"/>`;
+        mk += `<text x="${X(st.cx).toFixed(1)}" y="${(sy+sh*0.72).toFixed(1)}" text-anchor="middle" font-family="sans-serif" font-size="${(sh*0.62).toFixed(1)}" fill="#9c1a1a" font-weight="700" letter-spacing="1.5">STAGE</text>`;
       }
     });
-    // 하단 범례: 관극 횟수 1~10 (색은 시트맵과 동일, 숫자는 아래)
-    const sw=14, gap=2, total=10*sw+9*gap, lx=(cover.x+cover.w/2)-total/2;
-    mk += `<text x="${cover.x+cover.w/2}" y="${(legendY-7).toFixed(1)}" text-anchor="middle" font-size="9" font-weight="700" fill="#fff">관극 횟수</text>`;
+    // 하단 범례: 관극 횟수 1~10 — 정사각형 배지 안에 숫자('관극 횟수' 라벨 없음)
+    const sw=7.15, gap=3, total=10*sw+9*gap, lx=(cover.x+cover.w/2)-total/2, ly=cover.y+cover.h-20;
     for(let i=0;i<10;i++){
       const x=lx+i*(sw+gap);
-      mk += `<rect x="${x.toFixed(1)}" y="${legendY}" width="${sw}" height="9" rx="2" fill="${HEAT[i]}"/>`;
-      mk += `<text x="${(x+sw/2).toFixed(1)}" y="${legendY+19}" text-anchor="middle" font-size="8" fill="#fff">${i+1}</text>`;
+      mk += `<rect x="${x.toFixed(1)}" y="${ly}" width="${sw}" height="${sw}" rx="1.3" fill="${HEAT[i]}"/>`;
+      mk += `<text x="${(x+sw/2).toFixed(1)}" y="${(ly+sw/2+1.8).toFixed(1)}" text-anchor="middle" font-family="sans-serif" font-size="5" font-weight="700" fill="#fff">${i+1}</text>`;
     }
     const g=document.createElementNS("http://www.w3.org/2000/svg","g");
     g.setAttribute("id","fn-seatmap-live"); g.innerHTML=mk;
