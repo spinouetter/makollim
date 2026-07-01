@@ -82,6 +82,9 @@
     }
     // 발레/앙상블: cbd 상세 기준 단순 집계
     const ballet = new Map(), ensemble = new Map();
+    const balletTown = new Map();   // 발레걸즈 배우 → {애싱턴,베들링턴} 출연수(소속 섹션 판정용)
+    const charPos = new Map();      // 발레걸즈 캐릭터(배역) → 캐스팅 보드 등장 순서
+    const balletChar = new Map();   // 배우 → 맡은 캐릭터(정렬 기준)
     function gbump(map, name, won){
       let m = map.get(name); if(!m){ m={w:0,t:0}; map.set(name,m); }
       m.t++; if(won) m.w++;
@@ -112,7 +115,14 @@
           if(role === "앙상블" && Array.isArray(val)){
             val.forEach(x=>{ const nm = Array.isArray(x)?x[0]:x; if(nm) gbump(ensemble, nm, won); });
           } else {
-            const nm = firstName(val); if(nm) gbump(ballet, nm, won);
+            // 캐스팅 보드 등장 순서 = JSON 삽입 순서(최초 등장 시점 기록)
+            if(!charPos.has(role)) charPos.set(role, charPos.size);
+            const nm = firstName(val);
+            if(nm){ gbump(ballet, nm, won);
+              if(!balletChar.has(nm)) balletChar.set(nm, role);
+              // 이 공연의 town(애싱턴/베들링턴)에 배우 출연수 누적 → 실제 소속 판정
+              if(tn==="애싱턴"||tn==="베들링턴"){ let bt=balletTown.get(nm); if(!bt){ bt={"애싱턴":0,"베들링턴":0}; balletTown.set(nm,bt); } bt[tn]++; }
+            }
           }
         }
       } else if(p.cast && p.cast["발레걸즈"]){
@@ -120,7 +130,15 @@
       }
     });
 
-    const balletPool = [...ballet.entries()].map(([name,v])=>({name,...v})).sort((a,b)=>b.t-a.t);
+    const balletPool = [...ballet.entries()].map(([name,v])=>{
+      const bt = balletTown.get(name) || {"애싱턴":0,"베들링턴":0};
+      const a = bt["애싱턴"], b = bt["베들링턴"];
+      // 양쪽 town 모두 상당수 출연 → 어른(ADULTS), 아니면 우세 town 섹션
+      const group = Math.min(a,b) >= 10 ? "ADULTS" : (a >= b ? "ASHINGTON" : "BEDLINGTON");
+      const ch = balletChar.get(name);
+      const cp = charPos.has(ch) ? charPos.get(ch) : 999;
+      return {name, ...v, group, cp};
+    }).sort((a,b)=>a.cp - b.cp);
     const ensemblePool = [...ensemble.entries()].map(([name,v])=>({name,...v})).sort((a,b)=>b.t-a.t);
     const totalRun = perfs.length;
     const totalWatched = perfs.filter(p=>isEnded(p) && hasSeat(p)).length;
@@ -191,15 +209,16 @@
       const rk = ROLE_KEY[slug];
       fillRole(svg, slug, rosterOf(rk), data.pStat[rk] || new Map());
     }
-    // 발레걸즈(애싱턴·베들링턴·어른) — 풀에서 순차 배분
-    let bi = 0;
+    // 발레걸즈 — 배우별 실제 소속(town)으로 배정: 애싱턴/베들링턴/어른(양쪽 출연)
+    const BALLET_GROUP = { BALLET_GIRLS_ASHINGTON:"ASHINGTON", BALLET_GIRLS_BEDLINGTON:"BEDLINGTON", BALLET_GIRLS_ADULTS:"ADULTS" };
+    const balletMap = new Map(data.balletPool.map(p=>[p.name,p]));
     BALLET_SLUGS.forEach(slug=>{
-      // 슬롯 수 만큼 풀에서 가져오기
+      const g = BALLET_GROUP[slug];
+      const members = data.balletPool.filter(p=>p.group===g);   // 이미 캐스팅 보드 순서(cp)
       const slots = [];
       let i=0; while(svg.querySelector(`#fn-name-${slug}-${i}`)){ slots.push(i); i++; }
-      const names = slots.map(()=> (data.balletPool[bi] ? data.balletPool[bi++].name : null));
-      const map = new Map(data.balletPool.map(p=>[p.name,p]));
-      fillRole(svg, slug, names.map(n=>n||undefined), map);
+      const names = slots.map((_,k)=> members[k] ? members[k].name : null);
+      fillRole(svg, slug, names.map(n=>n||undefined), balletMap);
     });
     // 앙상블
     ENSEMBLE_SLUGS.forEach(slug=>{
