@@ -11,9 +11,15 @@
 (function(){
   "use strict";
 
-  const BOARD_URL = "images/finale-board.svg?v=3";
+  const BOARD_URL = "images/finale-board.svg?v=4";
   const META_URL  = "images/finale-board.meta.json?v=3";
   const CBD_PATH  = "json/casting_by_date.json";
+  // SVG에 임베드할 웹폰트(무료 OFL). 미리보기·PNG/JPG/PDF 내보내기 모두 자급자족.
+  const FONTS = [
+    { fam:"Anton",       url:"fonts/Anton-400.woff2" },       // 배역 라벨(Compacta 대체)
+    { fam:"Handlee",     url:"fonts/Handlee-400.woff2" },     // 관극 수 분자(손글씨)
+    { fam:"Paytone One", url:"fonts/PaytoneOne-400.woff2" },  // 관극 수 분모(둥근 산스)
+  ];
   const JSPDF_URL   = "https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js";
   const SVG2PDF_URL = "https://cdn.jsdelivr.net/npm/svg2pdf.js@2.2.3/dist/svg2pdf.umd.min.js";
   const KRFONT_URL  = "https://cdn.jsdelivr.net/gh/google/fonts/ofl/nanumgothic/NanumGothic-Regular.ttf";
@@ -80,9 +86,13 @@
       let m = map.get(name); if(!m){ m={w:0,t:0}; map.set(name,m); }
       m.t++; if(won) m.w++;
     }
+    // 발레걸즈 타운(애싱턴/베들링턴)별 공연 수·관극 수
+    const town = { "애싱턴":{w:0,t:0}, "베들링턴":{w:0,t:0} };
 
     perfs.forEach(p=>{
       const ended = isEnded(p), seated = hasSeat(p), won = ended && seated;
+      const tn = firstName((p.cast && p.cast["발레걸즈"]) || "");
+      if(town[tn]){ town[tn].t++; if(won) town[tn].w++; }
       // 주연 — 모드별 기여
       if(p.cast) for(const role in p.cast){
         const rk = normRole(role);
@@ -114,11 +124,31 @@
     const ensemblePool = [...ensemble.entries()].map(([name,v])=>({name,...v})).sort((a,b)=>b.t-a.t);
     const totalRun = perfs.length;
     const totalWatched = perfs.filter(p=>isEnded(p) && hasSeat(p)).length;
-    return { pStat, balletPool, ensemblePool, totalRun, totalWatched };
+    return { pStat, balletPool, ensemblePool, totalRun, totalWatched,
+             ballet: { ashington: town["애싱턴"], bedlington: town["베들링턴"] } };
   }
 
   // ---- 보드 채우기 ----
   function setText(svg, id, txt){ const el = svg.getElementById ? svg.getElementById(id) : document.getElementById(id); if(el) el.textContent = txt; return el; }
+
+  const SVGNS = "http://www.w3.org/2000/svg";
+  // 관극 수: 분자(관극)=Handlee(손글씨·금색, 획 stroke로 두껍게), 분모(/전체)=Paytone One(흰색). 같은 text/baseline·우측정렬.
+  function numTspan(txt){
+    const a = document.createElementNS(SVGNS, "tspan");
+    a.setAttribute("font-family", "Handlee"); a.setAttribute("fill", "#ffd24a");
+    a.setAttribute("stroke", "#ffd24a"); a.setAttribute("stroke-width", "0.42"); a.setAttribute("paint-order", "stroke");
+    a.textContent = txt; return a;
+  }
+  function setCount(cntEl, w, t){
+    if(!cntEl) return;
+    // 오른쪽 정렬: 카운트 영역 박스(rect.st4)의 우변에 맞춤(사진 박스 우측과 정렬).
+    const box = cntEl.parentNode && cntEl.parentNode.querySelector ? cntEl.parentNode.querySelector("rect.st4") : null;
+    if(box){ cntEl.setAttribute("text-anchor", "end"); cntEl.setAttribute("x", (box.x.baseVal.value + box.width.baseVal.value).toFixed(2)); }
+    while(cntEl.firstChild) cntEl.removeChild(cntEl.firstChild);
+    const b = document.createElementNS(SVGNS, "tspan");
+    b.setAttribute("font-family", "Paytone One"); b.textContent = " / " + fmt(t);
+    cntEl.appendChild(numTspan(fmt(w))); cntEl.appendChild(b);
+  }
 
   function fillRole(svg, slug, names, statMap){
     let i = 0;
@@ -130,7 +160,7 @@
       if(nm){
         nameEl.textContent = nm;
         const m = statMap && statMap.get ? statMap.get(nm) : (statMap ? statMap[nm] : null);
-        if(cntEl) cntEl.textContent = m ? `${fmt(m.w)} / ${fmt(m.t)}` : "0 / 0";
+        setCount(cntEl, m ? m.w : 0, m ? m.t : 0);
       } else {
         nameEl.textContent = "NAME";
         if(cntEl) cntEl.textContent = "";
@@ -163,11 +193,27 @@
       const map = new Map(data.ensemblePool.map(p=>[p.name,p]));
       fillRole(svg, slug, names.map(n=>n||undefined), map);
     });
+    // 발레걸즈 그룹 합계(애싱턴/베들링턴): id 없는 st5 '/NN' 텍스트 2개(문서 순서=애싱턴,베들링턴)
+    const grpTotals = [...svg.querySelectorAll("text.st5:not([id])")].filter(t => /^\/\d+$/.test((t.textContent||"").trim()));
+    const townStats = [data.ballet && data.ballet.ashington, data.ballet && data.ballet.bedlington];
+    grpTotals.slice(0,2).forEach((el, i) => { const g = townStats[i]; if(g) setCount(el, g.w, g.t); });
+
     // Total / 기간·장소
     svg.querySelectorAll("text").forEach(t=>{
       const s = (t.textContent||"").trim();
-      if(/^Total/.test(s)) t.textContent = `Total  ${data.totalWatched} / ${data.totalRun}`;
-      else if(/\d{4}\.\s*\d/.test(s)){ // 로고 날짜·장소
+      if(/^Total/.test(s)){
+        while(t.firstChild) t.removeChild(t.firstChild);
+        // 우측 정렬(윗 블록과 동일) + 조금 아래로(TOTAL_DY, viewBox 단위)
+        const TOTAL_DY = 10;
+        const box = t.parentNode && t.parentNode.querySelector ? t.parentNode.querySelector("rect.st4") : null;
+        if(box){ t.setAttribute("text-anchor", "end"); t.setAttribute("x", (box.x.baseVal.value + box.width.baseVal.value).toFixed(2)); }
+        const y0 = parseFloat(t.getAttribute("y")) || 0; t.setAttribute("y", (y0 + TOTAL_DY).toFixed(2));
+        const lab = document.createElementNS(SVGNS, "tspan");   // 'TOTAL'만 Anton
+        lab.setAttribute("font-family", "Anton"); lab.textContent = "TOTAL ";
+        const b = document.createElementNS(SVGNS, "tspan");     // 숫자는 위 카드와 동일(Handlee/Paytone)
+        b.setAttribute("font-family", "Paytone One"); b.textContent = " / " + data.totalRun;
+        t.appendChild(lab); t.appendChild(numTspan(" " + data.totalWatched)); t.appendChild(b);
+      } else if(/\d{4}\.\s*\d/.test(s)){ // 로고 날짜·장소
         const sub = [periodStr(), (seatmapData && seatmapData.theater) || ""].filter(Boolean).join("  ");
         if(sub) t.textContent = sub;
       }
@@ -247,6 +293,40 @@
     svg.appendChild(g);
   }
 
+  // 두 줄(tspan 줄바꿈)로 감긴 배역 라벨을 한 줄로 합치고, 언더라인 폭에 맞을 때까지 폰트를 1%씩 축소.
+  // 한 줄에 들어가면 그 배역은 그 크기에서 정지(배역마다 개별 크기).
+  function fitRoleLabels(svg){
+    const labels = [...svg.querySelectorAll("text.st21, text.st23")].filter(t => t.querySelector("tspan[dy]"));
+    const ctx = document.createElement("canvas").getContext("2d");
+    const BASE_PX = 24;   // st21/st23 = 1.99999em × 12px(기준 em) ≈ 24 user unit
+    const report = [];
+    labels.forEach(t=>{
+      let full = (t.textContent || "").replace(/\s+/g, " ").trim();
+      full = full.replace(/^MR\.\s+/, "");  // 'MR. BRAITHWAITE' → 'BRAITHWAITE' (MRS.는 유지)
+      if(!full) return;
+      t.textContent = full;                 // 여러 tspan 줄 → 한 줄
+      t.setAttribute("x", "0");              // 다른 배역과 동일하게 좌측 정렬
+      t.setAttribute("y", "1376.62");        // 한 줄 배역 라벨 기준 baseline
+      t.removeAttribute("text-anchor"); t.style.textAnchor = "start";
+      // 사용 가능한 폭 = 언더라인(st18) 폭(없으면 텍스트 박스 st4)
+      const shape = t.closest("g"), grp = shape && shape.parentElement;
+      let availW = 0;
+      // 언더라인 = 얇은(height<6) st18 rect
+      const uls = grp ? [...grp.querySelectorAll("rect.st18")].filter(r => r.height.baseVal.value < 6) : [];
+      if(uls.length) availW = Math.max(...uls.map(r => r.width.baseVal.value));
+      if(!availW){ const box = shape && shape.querySelector("rect.st4"); if(box) availW = box.width.baseVal.value; }
+      if(!availW) return;
+      // canvas measureText로 폭 측정(숨김 탭에서도 동작). 1%씩 축소해 언더라인 폭에 맞으면 정지.
+      const measure = s => { ctx.font = (BASE_PX*s) + "px 'Anton', sans-serif"; return ctx.measureText(full).width; };
+      let scale = 1.0, guard = 0;
+      while(measure(scale) > availW && scale > 0.4 && guard++ < 100){ scale -= 0.01; }  // 라벨 너비 = 언더라인 너비
+      if(full === "BRAITHWAITE") scale = 0.63;  // 긴 라벨: 사용자 선택 고정 크기
+      if(scale < 0.999) t.style.fontSize = (2*scale).toFixed(3) + "em";
+      report.push(full + " → " + Math.round(scale*100) + "%");
+    });
+    if(report.length) console.log("[finale] 배역 라벨 한 줄 맞춤:", report.join(" | "));
+  }
+
   // ---- 렌더 ----
   function getPreview(){ return document.getElementById("finalePreview"); }
   function currentSvg(){ const c=getPreview(); return c ? c.querySelector("svg") : null; }
@@ -254,20 +334,39 @@
 
   let boardText = null;
   async function loadBoard(){ if(boardText==null){ const r=await fetch(BOARD_URL); boardText = await r.text(); } return boardText; }
+  let fontCss = null;   // @font-face(base64) 모음 — SVG에 임베드
+  async function loadFontCss(){
+    if(fontCss==null){
+      const parts = await Promise.all(FONTS.map(async f=>{
+        try{ const r=await fetch(f.url); const b=new Uint8Array(await r.arrayBuffer()); let s=""; for(let i=0;i<b.length;i++) s+=String.fromCharCode(b[i]);
+          return `@font-face{font-family:'${f.fam}';src:url(data:font/woff2;base64,${btoa(s)}) format('woff2');}`; }
+        catch(e){ return ""; }
+      }));
+      fontCss = parts.join("");
+    }
+    return fontCss;
+  }
 
   async function renderFinale(){
     const container = getPreview();
     if(!container || !dataReady()) return;
-    const [txt, cbd] = await Promise.all([loadBoard(), loadCbd(), loadMeta()]);
+    const [txt, cbd, , css] = await Promise.all([loadBoard(), loadCbd(), loadMeta(), loadFontCss()]);
     container.innerHTML = txt;
     const svg = container.querySelector("svg");
     if(!svg) return;
+    // 웹폰트 임베드 + 배역 라벨(st21·st23)을 Anton으로 교체(미리보기·내보내기 자급자족)
+    if(css){
+      const fst = document.createElementNS("http://www.w3.org/2000/svg","style");
+      fst.textContent = css + `text.st21,text.st23{font-family:'Anton';}`;
+      svg.insertBefore(fst, svg.firstChild);
+    }
     svg.removeAttribute("width"); svg.removeAttribute("height");
     svg.setAttribute("viewBox", `0 0 ${VB_W} ${VB_H}`);
     svg.dataset.w = VB_W; svg.dataset.h = VB_H;
     svg.style.width = "100%"; svg.style.height = "auto"; svg.style.transformOrigin = "0 0";
     fillBoard(svg, computeData(finaleMode, cbd));
     injectSeatmap(svg);
+    if(css){ try{ if(document.fonts && document.fonts.load) await document.fonts.load('20px "Anton"'); }catch(e){} fitRoleLabels(svg); }
     resetZoom();
   }
 
