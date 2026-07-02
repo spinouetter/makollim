@@ -11,7 +11,7 @@
 (function(){
   "use strict";
 
-  const BOARD_URL = "images/finale-board.svg?v=20";
+  const BOARD_URL = "images/finale-board.svg?v=22";
   const META_URL  = "images/finale-board.meta.json?v=3";
   const CBD_PATH  = "json/casting_by_date.json";
   // SVG에 임베드할 웹폰트(무료 OFL). 미리보기·PNG/JPG/PDF 내보내기 모두 자급자족.
@@ -29,7 +29,8 @@
   const ANTON_TTF_URL  = "fonts/Anton-400.ttf";           // PDF 배역 헤딩(로컬 TTF)
   const KRFONT_TTF_URL = "fonts/IBMPlexSansKR-Medm.ttf";  // PDF 한글 벡터(로컬 TTF, CDN 불필요)
 
-  const VB_W = 760.394, VB_H = 1387.13;   // finale-board.svg viewBox
+  // viewBox를 흰 패널(st1)에 딱 맞게 크롭 → 바깥 투명 여백 제거(원본 760.394×1387.13에서 11.3386씩 잘라냄)
+  const VB_X = 11.3386, VB_Y = 11.3386, VB_W = 737.717, VB_H = 1364.46;
 
   // 보드 영문 SLUG → casts.json 한글 배역 키
   const ROLE_KEY = {
@@ -411,7 +412,7 @@
       svg.insertBefore(fst, svg.firstChild);
     }
     svg.removeAttribute("width"); svg.removeAttribute("height");
-    svg.setAttribute("viewBox", `0 0 ${VB_W} ${VB_H}`);
+    svg.setAttribute("viewBox", `${VB_X} ${VB_Y} ${VB_W} ${VB_H}`);
     svg.dataset.w = VB_W; svg.dataset.h = VB_H;
     fillBoard(svg, computeData(finaleMode, cbd));
     injectSeatmap(svg);
@@ -425,7 +426,7 @@
   function ensureDesigns(){
     if(DESIGNS) return;
     DESIGNS = [{ real:true, ar: VB_W/VB_H }];   // 실제 보드는 원래 비율(세로형)
-    for(let i=0;i<10;i++){
+    for(let i=0;i<5;i++){
       // placeholder 가로세로 비율 랜덤 — 0.75~1.35(줄 높이 통일 시 면적 차 최소화)
       const ar = 0.75 + Math.random() * (1.35 - 0.75);
       // 색은 다양하게(색상 전체 범위, 다크 UI에 맞게 채도·명도는 낮게)
@@ -506,7 +507,7 @@
   // ---- 크게 보기 오버레이 + 핀치/휠 줌(상하좌우 10% 마진까지만 이동) ----
   let zScale=1, zx=0, zy=0, baseW=0, baseH=0;
   const pointers = new Map(); let pinchDist=0, panStart=null;
-  const MARGIN = 0.10;   // 뷰포트 대비 허용 여백(그 밖으로는 못 나감)
+  const MARGIN = 0;   // 여백 오버스크롤 없음: 최소(맞춤) 배율에선 고정, 확대 시 가장자리까지만
   function applyZoom(){ const svg=boardSvg(); if(svg) svg.style.transform = `translate(${zx}px,${zy}px) scale(${zScale})`; }
   function clampScale(){ zScale=Math.max(1, Math.min(6, zScale)); }
   function clampPan(){

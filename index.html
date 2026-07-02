@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>막올림</title>
-<link rel="stylesheet" href="css/styles.css?v=70">
+<link rel="stylesheet" href="css/styles.css?v=71">
 </head>
 <body>
 
@@ -255,9 +255,6 @@
   </section>
 
   <section class="page" id="page-finale">
-    <div class="toolbar">
-      <div class="show-name">공연이 끝난 뒤 트위터 등에 올릴 <b>관극 인증 이미지</b>입니다. 마음에 드는 <b>디자인 썸네일</b>을 누르면 크게 보기가 열리고, 거기서 <b>PNG·JPG·PDF</b>로 저장할 수 있어요. <b>통계 기준</b>을 바꾸면 숫자가 다시 계산됩니다. (얼굴은 템플릿 이미지)</div>
-    </div>
     <div class="finale-bar">
       <label for="finaleModeSelect" style="font-size:12px; color:var(--ink-dim);">통계 기준</label>
       <select id="finaleModeSelect">
@@ -267,7 +264,9 @@
         <option value="weighted">공연 중 배역 변경 비중 반영</option>
       </select>
     </div>
-    <div id="finaleThumbs" class="finale-thumbs"></div>
+    <div class="finale-scroll">
+      <div id="finaleThumbs" class="finale-thumbs"></div>
+    </div>
   </section>
 
 </main>
@@ -324,6 +323,6 @@
 <script src="js/config.js?v=1"></script>
 <script src="js/app.js?v=92"></script>
 <script src="js/dropbox.js?v=4"></script>
-<script src="js/finale.js?v=28"></script>
+<script src="js/finale.js?v=31"></script>
 </body>
 </html>
