@@ -477,11 +477,45 @@
     }catch(e){}
     photoDataCache.set(url, durl); return durl;
   }
-  async function inlinePhotos(root){
+  // 사진을 슬롯 비율로 미리 잘라 data URI로 반환(cover, preserveAspectRatio 정렬 반영).
+  // svg2pdf가 preserveAspectRatio="slice"를 무시하고 늘려 그리므로, PDF에서는 이렇게
+  // 이미 잘린 이미지를 넣어 찌그러짐을 없앤다(브라우저 미리보기는 slice로 자동 크롭).
+  function croppedPhotoDataUrl(el, href){
+    return new Promise(res=>{
+      const boxW=parseFloat(el.getAttribute("width"))||1, boxH=parseFloat(el.getAttribute("height"))||1;
+      const boxAspect=boxW/boxH;
+      const par=el.getAttribute("preserveAspectRatio")||"xMidYMin";
+      const xMid=/xMid/i.test(par), yMid=/YMid/i.test(par);   // 정렬: 기본 xMid/ YMin(상단)
+      const img=new Image();
+      img.onload=()=>{
+        try{
+          const iw=img.naturalWidth, ih=img.naturalHeight, srcAspect=iw/ih;
+          let sx,sy,sw,sh;
+          if(srcAspect>boxAspect){ sh=ih; sw=ih*boxAspect; sy=0; sx=xMid?(iw-sw)/2:0; }   // 좌우 크롭
+          else { sw=iw; sh=iw/boxAspect; sx=0; sy=yMid?(ih-sh)/2:0; }                        // 상/하 크롭(YMin=상단)
+          const H=Math.max(1, Math.min(600, Math.round(sh))), W=Math.max(1, Math.round(H*boxAspect));
+          const cv=document.createElement("canvas"); cv.width=W; cv.height=H;
+          cv.getContext("2d").drawImage(img, sx,sy,sw,sh, 0,0,W,H);
+          res(cv.toDataURL("image/jpeg",0.92));
+        }catch(e){ res(null); }
+      };
+      img.onerror=()=>res(null);
+      img.src=href;
+    });
+  }
+  async function inlinePhotos(root, crop){
     const imgs = [...root.querySelectorAll("image")];
     await Promise.all(imgs.map(async el=>{
       const href = el.getAttribute("href") || el.getAttributeNS(XLINK, "href");
-      if(!href || href.indexOf("data:") === 0) return;
+      if(!href || href.indexOf("data:") === 0) return;   // placeholder(svg) 등 이미 인라인
+      if(crop){
+        const cropped = await croppedPhotoDataUrl(el, href);
+        if(cropped){
+          el.setAttribute("href", cropped); el.setAttributeNS(XLINK, "href", cropped);
+          el.setAttribute("preserveAspectRatio", "none");   // 이미 슬롯 비율 → 채워도 안 찌그러짐
+          return;
+        }
+      }
       const durl = await toDataUrl(href);
       if(durl){ el.setAttribute("href", durl); el.setAttributeNS(XLINK, "href", durl); }
     }));
@@ -571,7 +605,7 @@
       bakeStyles(svgForPdf);            // CSS 클래스 색·획을 속성으로 굽기 + 폰트 지정
       document.body.removeChild(svgForPdf);
       svgForPdf.querySelectorAll("style").forEach(s=>s.remove());   // @font-face 제거
-      await inlinePhotos(svgForPdf);                                 // 사진 임베드(벡터 PDF에도 필요)
+      await inlinePhotos(svgForPdf, true);                           // 사진 임베드+슬롯 비율 크롭
       if(typeof doc.svg==="function") await doc.svg(svgForPdf,{x:0,y:0,width:VB_W,height:VB_H});
       else await window.svg2pdf(svgForPdf,doc,{x:0,y:0,width:VB_W,height:VB_H});
       doc.save(`makollim-finale-${stamp()}.pdf`);
