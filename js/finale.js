@@ -11,7 +11,7 @@
 (function(){
   "use strict";
 
-  const BOARD_URL = "images/finale-board.svg?v=19";
+  const BOARD_URL = "images/finale-board.svg?v=20";
   const META_URL  = "images/finale-board.meta.json?v=3";
   const CBD_PATH  = "json/casting_by_date.json";
   // SVG에 임베드할 웹폰트(무료 OFL). 미리보기·PNG/JPG/PDF 내보내기 모두 자급자족.
@@ -421,11 +421,17 @@
   }
 
   // ---- 디자인 썸네일(현재 캐스트보드 1종 + placeholder 여러 개) ----
-  let DESIGNS = null, designOrder = null;
+  let DESIGNS = null, designOrder = null, lastLayoutW = -1;
   function ensureDesigns(){
     if(DESIGNS) return;
-    DESIGNS = [{ real:true }];
-    for(let i=0;i<10;i++) DESIGNS.push({ real:false });
+    DESIGNS = [{ real:true, ar: VB_W/VB_H }];   // 실제 보드는 원래 비율(세로형)
+    for(let i=0;i<10;i++){
+      // placeholder 가로세로 비율 랜덤 — 0.75~1.35(줄 높이 통일 시 면적 차 최소화)
+      const ar = 0.75 + Math.random() * (1.35 - 0.75);
+      // 색은 다양하게(색상 전체 범위, 다크 UI에 맞게 채도·명도는 낮게)
+      const color = `hsl(${Math.floor(Math.random()*360)} ${24+Math.floor(Math.random()*20)}% ${22+Math.floor(Math.random()*12)}%)`;
+      DESIGNS.push({ real:false, ar, color });
+    }
     designOrder = DESIGNS.map((_,i)=>i);
     for(let i=designOrder.length-1;i>0;i--){         // Fisher–Yates: refresh마다 랜덤 순서
       const j = Math.floor(Math.random()*(i+1));
@@ -441,6 +447,7 @@
       const d = DESIGNS[idx];
       const card = document.createElement("div");
       card.className = "finale-thumb " + (d.real ? "real" : "placeholder");
+      card.dataset.ar = d.ar;                        // 저스티파이드 레이아웃용 비율
       if(d.real){
         const clone = svg.cloneNode(true);
         clone.removeAttribute("id"); clone.removeAttribute("style");
@@ -450,11 +457,50 @@
         card.appendChild(badge);
         card.addEventListener("click", openFinaleOverlay);
       } else {
+        card.style.backgroundColor = d.color;
         card.innerHTML = '<div class="ph-inner"><span class="ph-icon">🎭</span><span class="ph-label">디자인 준비 중</span></div>';
         // placeholder는 클릭 반응 없음(핸들러 미등록)
       }
       wrap.appendChild(card);
     });
+    lastLayoutW = -1;
+    layoutThumbs();
+  }
+  // 같은 높이 저스티파이드 갤러리(Flickr식): 각 줄의 사진들은 높이를 통일하고
+  // 폭을 컨테이너에 꽉 차게 맞춘다(비율 유지, 줄 안·사이 여백 없음). 모바일은 한 줄 2장까지.
+  function layoutThumbs(){
+    const wrap = document.getElementById("finaleThumbs");
+    if(!wrap) return;
+    const W = wrap.clientWidth;
+    if(W <= 0) return;                 // 탭이 숨겨져 폭 0이면 보일 때 ResizeObserver가 재호출
+    lastLayoutW = W;
+    const GAP = 8;
+    const isMobile = W < 560;
+    const targetH = isMobile ? 200 : 240;      // 기준 줄 높이
+    const maxPerRow = isMobile ? 2 : Infinity;  // 모바일은 한 줄 최대 2장
+    const cards = [...wrap.children];
+    let y = 0, row = [], rowAr = 0;
+    const flush = (last)=>{
+      if(!row.length) return;
+      let h = (W - GAP*(row.length-1)) / rowAr;      // 폭을 꽉 채우는 줄 높이
+      if(last) h = Math.min(h, targetH);             // 마지막 줄은 과도하게 확대하지 않음
+      let x = 0;
+      row.forEach(c=>{
+        const w = (+c.dataset.ar) * h;
+        c.style.position = "absolute";
+        c.style.left = x + "px"; c.style.top = y + "px";
+        c.style.width = w + "px"; c.style.height = h + "px";
+        x += w + GAP;
+      });
+      y += h + GAP; row = []; rowAr = 0;
+    };
+    cards.forEach(c=>{
+      row.push(c); rowAr += (+c.dataset.ar);
+      const h = (W - GAP*(row.length-1)) / rowAr;
+      if(h <= targetH || row.length >= maxPerRow) flush(false);   // 폭이 다 차거나 최대 장수 도달 → 줄 확정
+    });
+    flush(true);
+    wrap.style.height = Math.max(0, y - GAP) + "px";
   }
 
   // ---- 크게 보기 오버레이 + 핀치/휠 줌(상하좌우 10% 마진까지만 이동) ----
@@ -696,6 +742,11 @@
     wire("finalePdfBtn", (b)=>exportPDF(b));
     // 오버레이 열려 있을 때 창 크기 바뀌면 다시 맞춤
     window.addEventListener("resize", ()=>{ const ov=document.getElementById("finaleOverlay"); if(ov && ov.style.display!=="none") fitBoard(); });
+    // 썸네일 저스티파이드 레이아웃: 폭이 바뀔 때(탭 표시·리사이즈)만 다시 계산
+    const wrap=document.getElementById("finaleThumbs");
+    if(wrap && window.ResizeObserver){
+      new ResizeObserver(entries=>{ const w=entries[0].contentRect.width; if(Math.abs(w-lastLayoutW)>=1) layoutThumbs(); }).observe(wrap);
+    }
     // 배경(뷰포트 밖) 클릭 시 닫기
     const ov=document.getElementById("finaleOverlay");
     if(ov) ov.addEventListener("click", e=>{ if(e.target===ov) closeFinaleOverlay(); });
